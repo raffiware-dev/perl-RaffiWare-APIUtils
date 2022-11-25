@@ -1,0 +1,16 @@
+*.swp
+*.swo
+*.swn
+testdb
+Makefile
+Makefile.old
+MYMETA.*
+blib/
+pm_to_blib
+*.bak
+*.tar.gz
+META.*
+inc/
+*.old
+*.log
+local/

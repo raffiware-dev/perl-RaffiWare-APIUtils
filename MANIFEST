@@ -1,0 +1,11 @@
+Changes
+cpanfile
+cpanfile.snapshot
+lib/RaffiWare/APIUtils.pm
+Makefile.PL
+MANIFEST			This list of files
+README
+script/spec.pl
+t/RaffiWare-APIUtils.t
+t/request_signing_verification.t
+t/time.t

@@ -1,0 +1,20 @@
+# Version control files and dirs.
+\bRCS\b
+\bCVS\b
+,v$
+\B\.svn\b
+\B\.git\b 
+^.gitignore$
+
+# Makemaker generated files and dirs.
+^MANIFEST\.
+^Makefile$
+^blib/
+^MakeMaker-\d
+
+^MYMETA.json$
+^MYMETA.yml$
+
+^local
+
+.*.tar.gz$
