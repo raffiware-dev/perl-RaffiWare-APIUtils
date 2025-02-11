@@ -236,7 +236,7 @@ sub gen_secure_rand {
     return makerandom_itv( 
               Upper => $upper,
               Size  => 256,
-              Strength => 0 # CHANGE LATER
+              Strength => 1
            );
 }
 
