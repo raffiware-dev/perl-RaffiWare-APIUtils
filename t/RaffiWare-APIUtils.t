@@ -1,34 +1,36 @@
 use strict;
 use warnings;
 
-use Test::More; 
-BEGIN { 
-    my @test_exports = qw| sign_exc_request 
-                           verify_exc_request  
+use Test::More;
 
-                           gen_uuid 
-                           gen_random_string
+BEGIN {
+  my @test_exports = qw| 
 
-                           get_local_time_stamp 
-                           get_local_timezone 
-                           get_utc_time_stamp 
+    sign_exc_request
+    verify_exc_request
 
-                           get_timestamp_iso8601 
-                           inflate_iso8601_datetime  
+    gen_uuid
+    gen_random_string
 
-                           prefix_uuid
-                           unprefix_uuid
-                           parse_uri_uuid 
-                           make_uri_uuid
-                           is_uuid
-                       |;
+    get_local_time_stamp
+    get_local_timezone
+    get_utc_time_stamp
 
-    use_ok('RaffiWare::APIUtils', @test_exports ) 
-};
+    get_timestamp_iso8601
+    inflate_iso8601_datetime
+
+    prefix_uuid
+    unprefix_uuid
+    parse_uri_uuid
+    make_uri_uuid
+    is_uuid
+  |;
+
+  use_ok( 'RaffiWare::APIUtils', @test_exports );
+}
 
 use Data::Dumper;
-use HTTP::Request::Common; 
-
+use HTTP::Request::Common;
 
 my $priv_key = '-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAspH2QB1pwa69AYJN48tdFsch96c/RjzCDDFObl8eyToZzidu
@@ -68,42 +70,48 @@ dbLiynsKayM9UDkwsuS53fTEfxzh+XanzUbzcQWqvoZdNZyurWA+SgtBQEomcr/K
 GwIDAQAB
 -----END RSA PUBLIC KEY-----';
 
-
 my $req        = GET('http://localhost/');
-my $signed_req = sign_exc_request(10, $req, $priv_key, 0 ); 
+my $signed_req = sign_exc_request( 10, $req, $priv_key, 0 );
 
 is( $signed_req->header('X-EXC-KeyID'), 10, 'KeyID header' );
-ok( $signed_req->header('X-EXC-TimeStamp'), 'TimeStamp header' ); 
-ok( defined $signed_req->header('X-EXC-TimeOffset'), 'TimeOffset header' );  
-ok( $signed_req->header('X-EXC-Signature'), 'Signature header' );  
+ok( $signed_req->header('X-EXC-TimeStamp'),          'TimeStamp header' );
+ok( defined $signed_req->header('X-EXC-TimeOffset'), 'TimeOffset header' );
+ok( $signed_req->header('X-EXC-Signature'),          'Signature header' );
 
-ok( verify_exc_request($signed_req, $pub_key), 'request verfied' );
+ok( verify_exc_request( $signed_req, $pub_key ), 'request verfied' );
 
-my $uuid = gen_uuid(); 
+my $uuid = gen_uuid();
 
-is make_uri_uuid('7c89628f-6878-41ae-8911-7c8f850f633e'), '7c89628f687841ae89117c8f850f633e', 'make uri_uuid';
-  
-is parse_uri_uuid('7c89628f687841ae89117c8f850f633e'), '7c89628f-6878-41ae-8911-7c8f850f633e', 'uri_uuid parsed';
+is make_uri_uuid('7c89628f-6878-41ae-8911-7c8f850f633e'), '7c89628f687841ae89117c8f850f633e',
+  'make uri_uuid';
 
-is parse_uri_uuid('av_8c89628f687841ae89117c8f850f633f'), '8c89628f-6878-41ae-8911-7c8f850f633f', 'uri_uuid parsed with prefix'; 
+is parse_uri_uuid('7c89628f687841ae89117c8f850f633e'), '7c89628f-6878-41ae-8911-7c8f850f633e',
+  'uri_uuid parsed';
 
-is parse_uri_uuid('8c89628f-6878-41ae-8911-7c8f850f633f'), '8c89628f-6878-41ae-8911-7c8f850f633f', 'uri_uuid parsed with uuid';  
+is parse_uri_uuid('av_8c89628f687841ae89117c8f850f633f'), '8c89628f-6878-41ae-8911-7c8f850f633f',
+  'uri_uuid parsed with prefix';
+
+is parse_uri_uuid('8c89628f-6878-41ae-8911-7c8f850f633f'), '8c89628f-6878-41ae-8911-7c8f850f633f',
+  'uri_uuid parsed with uuid';
 
 ok !defined parse_uri_uuid('somegarbab123'), 'bad uuid returns undef';
 
-is prefix_uuid('t','7c89628f-6878-41ae-8911-7c8f850f633e'), 't_7c89628f687841ae89117c8f850f633e', 'prefi_uuid'; 
+is prefix_uuid( 't', '7c89628f-6878-41ae-8911-7c8f850f633e' ),
+  't_7c89628f687841ae89117c8f850f633e', 'prefi_uuid';
 
-is unprefix_uuid('t_7c89628f687841ae89117c8f850f633e'), '7c89628f-6878-41ae-8911-7c8f850f633e', 'unprefix_uuid scalar'; 
+is unprefix_uuid('t_7c89628f687841ae89117c8f850f633e'), '7c89628f-6878-41ae-8911-7c8f850f633e',
+  'unprefix_uuid scalar';
 
-is_deeply [ unprefix_uuid('t_7c89628f687841ae89117c8f850f633e')], ['7c89628f-6878-41ae-8911-7c8f850f633e', 't'], 'unprefix_uuid array';  
+is_deeply [ unprefix_uuid('t_7c89628f687841ae89117c8f850f633e') ],
+  [ '7c89628f-6878-41ae-8911-7c8f850f633e', 't' ], 'unprefix_uuid array';
 
 ok !defined unprefix_uuid(), 'undef';
 
-ok !defined unprefix_uuid('blahadsf2342'), 'undef'; 
+ok !defined unprefix_uuid('blahadsf2342'), 'undef';
 
-diag(gen_random_string( 32, ["A".."Z", "a".."z", 0..9, split('', '!#+,-./:=@_') ] ) );
+diag( gen_random_string( 32, [ "A" .. "Z", "a" .. "z", 0 .. 9, split( '', '!#+,-./:=@_' ) ] ) );
 
-ok is_uuid(gen_uuid()), 'is_uuid';
-ok !is_uuid('blahasdf2340s2343'), 'is_uuid'; 
+ok is_uuid( gen_uuid() ),         'is_uuid';
+ok !is_uuid('blahasdf2340s2343'), 'is_uuid';
 
 done_testing();

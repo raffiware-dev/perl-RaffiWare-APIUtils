@@ -4,11 +4,11 @@ use warnings;
 use Test::More;
 
 use RaffiWare::APIUtils qw| sign_exc_request verify_exc_request
-                            gen_uuid prefix_uuid |;
+  gen_uuid prefix_uuid |;
 
 use Data::Dumper;
 use JSON qw| encode_json decode_json |;
-use HTTP::Request::Common;  
+use HTTP::Request::Common;
 
 my $priv_key = '-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAspH2QB1pwa69AYJN48tdFsch96c/RjzCDDFObl8eyToZzidu
@@ -46,52 +46,52 @@ DvQbTgldW2Il0p8DzgbUwb7Z4MGrTqKLYZgmX3RRQZj5Rk3O0nJhp5nVSWdiz8lo
 2FUnqfPs9r4kJrQFwb0CHosB56HgDdB24X/MCR3hNMqKhTX1upDhNct0AF76yB73
 dbLiynsKayM9UDkwsuS53fTEfxzh+XanzUbzcQWqvoZdNZyurWA+SgtBQEomcr/K
 GwIDAQAB
------END RSA PUBLIC KEY-----'; 
+-----END RSA PUBLIC KEY-----';
 
-my $key_id      = prefix_uuid( 't', gen_uuid() );
-my $req         = GET('http://localhost/some/resource');
-my $signed_req  = sign_exc_request($key_id, $req, $priv_key, 0 ); 
+my $key_id     = prefix_uuid( 't', gen_uuid() );
+my $req        = GET('http://localhost/some/resource');
+my $signed_req = sign_exc_request( $key_id, $req, $priv_key, 0 );
 
 is( $signed_req->header('X-EXC-KeyID'), $key_id, 'KeyID header' );
-ok( $signed_req->header('X-EXC-TimeStamp'), 'TimeStamp header' ); 
-ok( defined $signed_req->header('X-EXC-TimeOffset'), 'TimeOffset header' );  
-ok( $signed_req->header('X-EXC-Signature'), 'Signature header' );
+ok( $signed_req->header('X-EXC-TimeStamp'),          'TimeStamp header' );
+ok( defined $signed_req->header('X-EXC-TimeOffset'), 'TimeOffset header' );
+ok( $signed_req->header('X-EXC-Signature'),          'Signature header' );
 
-ok( verify_exc_request($signed_req, $pub_key), 'GET request verified' ); 
+ok( verify_exc_request( $signed_req, $pub_key ), 'GET request verified' );
 
-my @req_args = ( 
-  'Content-type' => 'application/json;charset=utf-8', 
-  'Content'      => encode_json({ some => 'request', data => [qw| this that |]})
+my @req_args = (
+  'Content-type' => 'application/json;charset=utf-8',
+  'Content'      => encode_json( { some => 'request', data => [qw| this that |] } )
 );
 
-$key_id      = prefix_uuid( 't', gen_uuid() ); 
-$req         = POST('http://localhost/some/collection', @req_args ); 
-$signed_req  = sign_exc_request($key_id, $req, $priv_key, 0 );
+$key_id     = prefix_uuid( 't', gen_uuid() );
+$req        = POST( 'http://localhost/some/collection', @req_args );
+$signed_req = sign_exc_request( $key_id, $req, $priv_key, 0 );
 
 is( $signed_req->header('X-EXC-KeyID'), $key_id, 'KeyID header' );
-ok( $signed_req->header('X-EXC-TimeStamp'), 'TimeStamp header' ); 
-ok( defined $signed_req->header('X-EXC-TimeOffset'), 'TimeOffset header' );  
-ok( $signed_req->header('X-EXC-Signature'), 'Signature header' ); 
+ok( $signed_req->header('X-EXC-TimeStamp'),          'TimeStamp header' );
+ok( defined $signed_req->header('X-EXC-TimeOffset'), 'TimeOffset header' );
+ok( $signed_req->header('X-EXC-Signature'),          'Signature header' );
 
-ok( verify_exc_request($signed_req, $pub_key), 'POST request verified' );  
+ok( verify_exc_request( $signed_req, $pub_key ), 'POST request verified' );
 
 # Modified content after signing.
-$signed_req->content(encode_json({ some => 'request_modified', data => [qw| this that |]}));
-ok( !verify_exc_request($signed_req, $pub_key), 'request verified failed' );   
+$signed_req->content( encode_json( { some => 'request_modified', data => [qw| this that |] } ) );
+ok( !verify_exc_request( $signed_req, $pub_key ), 'request verified failed' );
 
-$key_id      = prefix_uuid( 't', gen_uuid() ); 
-$req         = GET('http://localhost/some/collection?search={"this":"that"}', @req_args ); 
-$signed_req  = sign_exc_request($key_id, $req, $priv_key, 0 ); 
+$key_id     = prefix_uuid( 't', gen_uuid() );
+$req        = GET( 'http://localhost/some/collection?search={"this":"that"}', @req_args );
+$signed_req = sign_exc_request( $key_id, $req, $priv_key, 0 );
 
-ok( verify_exc_request($signed_req, $pub_key), 'GET request with query verfied' );  
+ok( verify_exc_request( $signed_req, $pub_key ), 'GET request with query verfied' );
 
 $signed_req->uri('http://localhost/some/collection?search={"this":"those"}');
-ok( !verify_exc_request($signed_req, $pub_key), 'GET request with altered query verify failed' );   
+ok( !verify_exc_request( $signed_req, $pub_key ), 'GET request with altered query verify failed' );
 
-$req         = GET('http://localhost:8000/some/object#this', @req_args ); 
+$req = GET( 'http://localhost:8000/some/object#this', @req_args );
 my $tokens;
-($signed_req,$tokens)  = sign_exc_request($key_id, $req, $priv_key, 0 ); 
+( $signed_req, $tokens ) = sign_exc_request( $key_id, $req, $priv_key, 0 );
 
-ok( verify_exc_request($signed_req, $pub_key), 'GET request with host:port verified' );   
+ok( verify_exc_request( $signed_req, $pub_key ), 'GET request with host:port verified' );
 
 done_testing();
