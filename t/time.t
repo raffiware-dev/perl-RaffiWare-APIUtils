@@ -35,4 +35,11 @@ my $iso_timestamp = get_timestamp_iso8601($dt);
 
 is $iso_timestamp, $ts, 'got timestamp back';
 
+#$dt = $dt->subtract( seconds => 1, nanoseconds => $dt->nanosecond ); 
+$dt = $dt->subtract( seconds => 1.7, nanoseconds => $dt->nanosecond );  
+
+$iso_timestamp = get_timestamp_iso8601($dt); 
+
+diag $iso_timestamp;
+
 done_testing();

@@ -140,7 +140,7 @@ sub gen_tokens_for_request {
     'Resource'      => get_canonical_host($url),
     'ResourcePath'  => $url->path_query,
     'TimeOffset'    => $offset // 0,
-    'TimeStamp'     => get_local_time_stamp(),
+    'TimeStamp'     => get_utc_time_stamp(),
   };
 }
 
