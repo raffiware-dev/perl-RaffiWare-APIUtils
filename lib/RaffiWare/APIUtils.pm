@@ -66,7 +66,7 @@ our @EXPORT_OK = qw|
   get_canonical_host
 |;
 
-our $VERSION = '0.02';
+our $VERSION = '0.002001';
 $VERSION = eval $VERSION;
 
 my %RSA_FUNC_MAP = (
