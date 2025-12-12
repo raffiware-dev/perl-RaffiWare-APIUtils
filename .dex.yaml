@@ -1,0 +1,60 @@
+version: 2
+vars:
+
+  distname: 'RaffiWare-APIUtils' 
+
+  version:
+    from_command: perl -Ilib -MRaffiWare::APIUtils -e 'print "$RaffiWare::APIUtils::VERSION"'
+
+  docker_image: raffiware-apiutils-perl
+
+  cwd: 
+    from_command: pwd | tr -d '\n' 
+
+  docker_registry:
+    from-env: RFW_DOCKER_REGISTRY
+    default: 'devstore.raffiware.io'
+
+  git_branch: 
+    from_command: git rev-parse --abbrev-ref HEAD
+
+blocks:
+
+  - name: info
+    desc: dist info
+    commands:
+      - diag: '[%distname%]-[%version%]-[%git_branch%]'  
+
+  - name: build
+    desc: "Build All" 
+    commands:
+      - exec: dex build-dist
+      - exec: dex build-container
+
+
+  - name: build-dist 
+    desc: "Build Dist"
+    commands:
+      - diag: 'building [%distname%]-[%version%]' 
+      - exec: rm -rf [%distname%]-[%version%]*
+      - exec: make clean
+      - exec: perl Makefile.PL
+      - exec: make dist 
+
+  - name: build-container 
+    desc: "Build Docker Container"
+    commands:
+      - diag: 'building [%docker_image%]:v[%version%]-[%git_branch%]' 
+      - exec: rm -rf [% cwd %]/docker/[%distname%]-[%version%]*
+      - exec: cp [%distname%]-[%version%].tar.gz [% cwd %]/docker
+      - dir: "[% cwd %]/docker"
+        exec: docker build -t [%docker_image%]:v[%version%] --build-arg VERSION=[%version%] .
+
+  - name: push-container
+    desc: "Push to docker registry" 
+
+    commands:
+      - diag: "tagging and pushing [%docker_registry%]/[%docker_image%]:v[%version%]" 
+      - exec: docker tag [%docker_image%]:v[%version%] [%docker_registry%]/[%docker_image%]:v[%version%]
+      - exec: docker push [%docker_registry%]/[%docker_image%]:v[%version%] 
+

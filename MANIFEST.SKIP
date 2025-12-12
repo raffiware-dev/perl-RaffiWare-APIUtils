@@ -17,4 +17,5 @@
 
 ^local
 
+.*.tar
 .*.tar.gz$

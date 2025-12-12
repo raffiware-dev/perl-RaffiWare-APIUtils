@@ -5,25 +5,36 @@ WriteMakefile(
     NAME              => 'RaffiWare::APIUtils',
     VERSION_FROM      => 'lib/RaffiWare/APIUtils.pm', 
     PREREQ_PM         => {
-      'Module::Load::Conditional' => 0,
-      'Crypt::Random'             => 0,
       'URI'                       => 0,
-      'DateTime'                  => 0,
       'Data::UUID'                => 0,
-      'DateTime::Format::ISO8601' => 0,
       'MIME::Base64'              => 0,
-      'Time::HiRes'               => 0,
       'Try::Tiny'                 => 0,
       'UUID4::Tiny'               => 0,
-      'Crypt::PK::RSA'            => 0  
+      'Crypt::PK::Ed25519'        => 0,
+      'Crypt::PK::X25519'         => 0,
+      'Crypt::AuthEnc::GCM'       => 0, 
+      'Crypt::PRNG'               => 0, 
+      'Crypt::KeyDerivation'      => 0,
+      'HTTP::Request::Common'     => 0, 
+      'DateTime'                  => 0, 
+      'DateTime::Format::ISO8601' => 0, 
+
     }, 
     "TEST_REQUIRES" => {
       "ExtUtils::MakeMaker" => 0,
       "Test::Deep" => 0,
-      "Test::More" => "0.92"
+      "Test::More" => "0.92",
+      "Test::Most" => 0
     },
     "test" => {
       "TESTS" => "t/*.t"
+    },
+    META_MERGE => {
+       "meta-spec" => { version => 2 },
+       provides => {
+           'RaffiWare::APIUtils'           => { file => 'lib/RaffiWare/APIUtils.pm' },
+           'RaffiWare::APIUtils::DateTime' => { file => 'lib/RaffiWare/APIUtils/DateTime.pm' },
+       },
     },
     ABSTRACT_FROM     => 'lib/RaffiWare/APIUtils.pm',
     AUTHOR            => 'RaffiWare  <dev@raffiware.io>',

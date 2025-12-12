@@ -3,51 +3,77 @@ package RaffiWare::APIUtils;
 use strict;
 use warnings;
 
-our $RSA_MODULE;
 
-BEGIN {
-  use Module::Load::Conditional qw|can_load|;
-
-  $RSA_MODULE = 'Crypt::Perl';
-
-  if ( can_load( module => { 'Crypt::PK::RSA' => 0 } ) ) {
-    $RSA_MODULE = 'Crypt::PK::RSA';
-  }
-
-  Module::Load::load($RSA_MODULE);
-}
-
-# Keep compat with FatPacker
 use Carp;
-use Crypt::Random qw| makerandom_itv |;
+
+use Crypt::KeyDerivation 'hkdf'; 
+use Crypt::PK::Ed25519;
+use Crypt::PK::X25519; 
+use Crypt::AuthEnc::GCM qw(gcm_encrypt_authenticate gcm_decrypt_verify);
+use Crypt::PRNG qw(random_bytes irand );
+
+use JSON qw| decode_json encode_json |; 
 use URI;
-use DateTime;
 use Data::UUID;
-use DateTime::Format::ISO8601;
-use MIME::Base64;
+use MIME::Base64 qw| encode_base64url decode_base64url |; 
 use POSIX       qw(strftime);
 use Digest::SHA qw|sha256_hex|;
-use Time::HiRes qw(time);
 use Try::Tiny;
 use UUID4::Tiny qw| create_uuid uuid_to_string |;
 use Data::Dumper;
+use Time::Piece;
 
+
+use RaffiWare::APIUtils::DateTime qw|
+  get_local_timezone
+  get_local_datetime
+  get_local_time_stamp
+  get_utc_datetime
+  get_utc_timepiece
+  get_utc_time_stamp
+  get_utc_time_stamp_tp 
+  inflate_iso8601_datetime
+  inflate_iso8601_timepiece
+  get_timestamp_iso8601
+|;
 require Exporter;
 
 our @ISA = qw(Exporter);
+
+our $VERSION = '1.001001';
+$VERSION = eval $VERSION; 
 
 our @EXPORT_OK = qw|
 
   sign_exc_request
   verify_exc_request
+  verify_exc_response
+  verify_exc_command
+  verify_exc_key 
+  verify_exc_key_and_signer
   verify_exc_tokens
+
+  create_ed25519_keys
+  create_x25519_keys 
+
+  key_encoding
+  stored_key_encoding 
+
+  load_public_key
+  get_dh_encryptor
+  encrypt_with_secret
+  decrypt_with_secret
+  get_shared_secret_from_keys 
 
   get_local_timezone
   get_local_datetime
   get_local_time_stamp
   get_utc_datetime
+  get_utc_timepiece
   get_utc_time_stamp
+  get_utc_time_stamp_tp 
   inflate_iso8601_datetime
+  inflate_iso8601_timepiece
   get_timestamp_iso8601
 
   gen_uuid
@@ -63,51 +89,80 @@ our @EXPORT_OK = qw|
   msg_from_tokens
   tokens_from_msg
   gen_tokens_for_request
+  get_request_tokens
   get_canonical_host
+
+  encode_bin
+  decode_bin
+
 |;
 
-our $VERSION = '0.002001';
-$VERSION = eval $VERSION;
+our $PK_MODULE = 'Ed25519';
+our $DH_MODULE = 'X25519'; 
 
-my %RSA_FUNC_MAP = (
-  'Crypt::PK::RSA' => {
-    new => sub { Crypt::PK::RSA->new( \$_[0] ); },
+my %PK_FUNC_MAP = (
+  'Ed25519' => {
+    new => sub {
 
-    # Configuring from compatibility with jsrsasign SHA256withRSAandMGF1 algorithm. See:
-    #   https://kjur.github.io/jsrsasign/api/symbols/KJUR.asn1.x509.AlgorithmIdentifier.html
-    #
+
+    },
+    load => sub { 
+
+      my $key_data = \$_[0];
+      try { Crypt::PK::Ed25519->new($key_data) }
+      catch { Carp::confess($_) }; 
+
+    },
     sign => sub {
       my ( $key, $msg ) = @_;
-      $key->sign_message( $msg, 'SHA256', 'pss', 32 );
-    },    #, 'v1.5'); },
+      $key->sign_message($msg);
+    },
     verify => sub {
       my ( $key, $sig, $msg ) = @_;
-      $key->verify_message( $sig, $msg, 'SHA256', 'pss', 32 );
-    }     #, 'v1.5' ); }
-  },
-  'Crypt::Perl' => {
 
-    #  my $prkey1 = Crypt::Perl::RSA::Parse::private($pem_or_der);
-    #  my $pbkey1 = Crypt::Perl::RSA::Parse::public($pem_or_der);
-    #
-    #  #----------------------------------------------------------------------
-    #
-    #  my $prkey = Crypt::Perl::RSA::Generate::generate(2048);
-    #
-    #  my $der = $prkey->to_der();
-    #  my $der2 = $prkey->to_pem();
-    #
-    #  #----------------------------------------------------------------------
-    #
-    #  my $msg = 'My message';
-    #
-    #  my $sig = $prkey->sign_RS256($msg);
-    #
-    #  die 'wrong' if !$prkey->verify_RS256($msg, $sig);
+      return  $key->verify_message( $sig, $msg );
+    }
+  }, 
+  'X25519' => {
+    new => sub { 
+      return Crypt::PK::X25519->new->generate_key
+    },
+    load => sub {
+      my $key_data = \$_[0];
+      try { Crypt::PK::X25519->new($key_data) }
+      catch { Carp::confess($_) };  
+    },
+    shared_secret => sub {
+      my ( $key, $other_pk ) = @_;
+
+      return $key->shared_secret($other_pk); 
+    }
   },
 );
 
-# Has and Sign message body
+
+sub create_ed25519_keys {
+
+  my $pk = Crypt::PK::Ed25519->new();
+
+  $pk->generate_key();
+
+  my $public_der = encode_bin($pk->export_key_der('public'));
+
+  return ( $public_der, $pk );
+} 
+
+sub create_x25519_keys {
+
+  my $pk = Crypt::PK::X25519->new();
+
+  $pk->generate_key();
+
+  my $public_der = encode_bin($pk->export_key_der('public'));
+
+  return ( $public_der, $pk );
+}
+
 sub sign_exc_request {
   my ( $key_id, $req, $key_string, $offset ) = @_;
 
@@ -129,8 +184,7 @@ sub gen_tokens_for_request {
 
   my $content = $req->content || '';
 
-  my $nonce;
-  $nonce .= int( gen_secure_rand(99) ) for ( 1 .. 5 );
+  my $nonce = irand();
 
   return {
     'Content'       => sha256_hex($content),
@@ -140,7 +194,7 @@ sub gen_tokens_for_request {
     'Resource'      => get_canonical_host($url),
     'ResourcePath'  => $url->path_query,
     'TimeOffset'    => $offset // 0,
-    'TimeStamp'     => get_utc_time_stamp(),
+    'TimeStamp'     => get_utc_time_stamp_tp(),
   };
 }
 
@@ -156,15 +210,15 @@ sub verify_exc_request {
   my ( $req, $pub_key_string ) = @_;
 
   my @required = qw| 
-                   X-EXC-KeyID
-                   X-EXC-Signature
-                   X-EXC-TimeStamp
-                   X-EXC-TimeOffset
-                   X-EXC-Nonce
-                 |;
+    X-EXC-KeyID
+    X-EXC-Signature
+    X-EXC-TimeStamp
+    X-EXC-TimeOffset
+    X-EXC-Nonce
+  |;
 
   foreach (@required) {
-    croak("Missing Header: $_")
+    die("Missing Header: $_\n")
       if !defined $req->header($_);
   }
 
@@ -184,31 +238,185 @@ sub verify_exc_request {
   return verify_exc_tokens( \%tokens, $req->header('X-EXC-Signature'), $pub_key_string );
 }
 
-sub verify_exc_tokens {
-  my ( $tokens, $enc_sig, $pub_key_string ) = @_;
+sub get_request_tokens {
+  my $req = shift;
 
-  my $key = $RSA_FUNC_MAP{$RSA_MODULE}->{new}->($pub_key_string);
+  my $url = URI->new( $req->uri );
+
+  return {
+    'Content'       => sha256_hex( $req->content || '' ),
+    'KeyID'         => $req->header('X-EXC-KeyID'),
+    'Nonce'         => $req->header('X-EXC-Nonce'),
+    'RequestMethod' => lc $req->method,
+    'Resource'      => get_canonical_host($url),
+    'ResourcePath'  => $url->path_query,
+    'TimeOffset'    => $req->header('X-EXC-TimeOffset'),
+    'TimeStamp'     => $req->header('X-EXC-TimeStamp'),
+  };
+}
+
+sub verify_exc_response {
+  my ( $resp, $authority ) = @_;
+
+  my $req_id  = $resp->header('x-exc-requestid'); 
+  my $ts      = $resp->header('x-exc-timestamp');
+  my $nonce   = $resp->header('x-exc-nonce');
+  my $sig     = $resp->header('x-exc-signature');
+  my $req_sig = $resp->request->header('x-exc-signature'); 
+
+  my $signer_key_data = decode_json(decode_bin($resp->header('x-exc-key')));
+
+  my $tokens = {
+    Nonce     => $nonce,
+    TimeStamp => $ts,
+    RequestId => $req_id,
+    Code      => $resp->code,
+    $req_sig
+       ? ( RequestSignature => $req_sig )
+       : (),
+    $resp->code != 204
+      ? (  Body => sha256_hex($resp->content) )
+      : ()
+  }; 
+
+  verify_exc_key_and_signer( $signer_key_data, $authority ) 
+    or return;
+
+  return verify_exc_tokens( $tokens, $sig, $signer_key_data->{public_key} );
+} 
+
+sub verify_exc_key_and_signer {
+  my ( $key_data, $authority_pub, $revoked_keys ) = @_;
+
+  my $signer_data = $key_data->{signed_by}; 
+  my $signer_sig  = $signer_data->{signature};
+  my $signer_pub  = $signer_data->{public_key}; 
+
+  try {
+    verify_exc_key( $signer_data, $signer_sig, $authority_pub, $revoked_keys )
+  }
+  catch {
+    die("Signer Verification Failed: $_\n");
+  };
+
+  my $signature = $key_data->{signature};
+
+  try { 
+    verify_exc_key( $key_data, $signature, $signer_pub, $revoked_keys );
+  }
+  catch {
+    die("Key Verification Failed: $_\n");
+  }; 
+}
+
+sub verify_exc_key {
+  my ($key_data, $sig, $signer_pub, $revoked_keys ) = @_;
+
+  my $id         = $key_data->{id};
+  my $owner_id   = $key_data->{owner_id};
+  my $created_ts = $key_data->{created};
+  my $expires_ts = $key_data->{expires};
+  my $context    = $key_data->{context} || {};
+  my $public_key = $key_data->{public_key}; 
+
+  die("Invald Data\n") 
+     unless ( $id && $owner_id && $created_ts && $expires_ts && $public_key );
+
+  die("Invalid Key\n") if $revoked_keys && $revoked_keys->{$id};
+
+  my $created_dt = inflate_iso8601_timepiece($created_ts);
+  my $expires_dt = inflate_iso8601_timepiece($expires_ts); 
+  my $now_dt     = get_utc_timepiece();
+
+  die("Invalid Date  $created_dt > $now_dt \n") if $created_dt > $now_dt;
+  die("Expired\n") if $now_dt > $expires_dt; 
+
+  my $tokens = {
+     id       => $id,
+     owner_id => $owner_id,
+     created  => $created_ts,
+     expires  => $expires_ts,
+     context  => msg_from_tokens($context),
+     pub_key  => decode_bin($public_key)
+  };
+
+  die("Key Validation Failed\n") unless verify_exc_tokens( $tokens, $sig, $signer_pub );
+}
+
+sub verify_exc_command {
+  my (%args) = @_;
+
+  my $public_key = $args{public_key} or die("Missing Public Key\n");
+  my $tokens = {
+   map {
+    defined $args{$_} or die("Missing Token $_\n");
+
+    ( $_ => $args{$_} ) 
+   }
+   qw|
+     instance_id
+     site_id
+     site_user_id
+     created_ts
+     command_string
+     command_id
+     key_id
+   |
+  };
+
+  my $type = $args{execute_type};
+
+  if ( $type eq 'script' ) {
+    $tokens->{command_string} .= sha256_hex( $args{script_src} );
+  }
+
+  return verify_exc_tokens( $tokens, $args{'site_user_signature'}, $public_key ); 
+}
+
+sub load_public_key {
+  my ( $pub_key_enc, $algorithm ) = @_; 
+
+  $algorithm  ||= $PK_MODULE;
+
+  my $der = decode_bin($pub_key_enc);
+
+  return $PK_FUNC_MAP{$algorithm}->{load}->($der); 
+}
+
+sub encode_bin { return encode_base64url(shift); }
+sub decode_bin { return decode_base64url(shift); }
+
+sub verify_exc_tokens {
+  my ( $tokens, $enc_sig, $pub_key_enc ) = @_;
+
+  my $key = load_public_key($pub_key_enc);
   my $msg = msg_from_tokens($tokens);
 
-  my $sig = decode_base64($enc_sig);
+  my $sig = decode_bin($enc_sig);
 
-  return $RSA_FUNC_MAP{$RSA_MODULE}->{verify}->( $key, $sig, $msg );
+  return $PK_FUNC_MAP{$PK_MODULE}->{verify}->( $key, $sig, $msg );
 }
 
 sub gen_signature {
   my ( $key_string, $tokens ) = @_;
 
-  my $key = $RSA_FUNC_MAP{$RSA_MODULE}->{new}->($key_string);
-  my $msg = msg_from_tokens($tokens);
-  my $sig = $RSA_FUNC_MAP{$RSA_MODULE}->{sign}->( $key, $msg );
+  my $der = decode_bin($key_string);
 
-  return encode_base64( $sig, '' );
+  my $key = $PK_FUNC_MAP{$PK_MODULE}->{load}->($der);
+  my $msg = msg_from_tokens($tokens);
+
+  my $sig = $PK_FUNC_MAP{$PK_MODULE}->{sign}->( $key, $msg );
+
+  return encode_bin($sig);
 }
 
 sub msg_from_tokens {
   my $tokens = shift;
 
-  return join( ',', map { $tokens->{$_} } sort { $a cmp $b } keys %$tokens );
+  return join( ',', map { $tokens->{$_} } 
+                    sort { $a cmp $b } 
+                    grep { $tokens->{$_} .'' ne '' } 
+                    keys %$tokens );
 }
 
 sub tokens_from_msg {
@@ -229,91 +437,89 @@ sub tokens_from_msg {
   };
 }
 
-sub gen_secure_rand {
-  my $upper = shift;
+sub get_dh_encryptor {
+  my ( $their_dh_pk ) = @_;
 
-  return makerandom_itv(
-    Upper    => $upper,
-    Size     => 256,
-    Strength => 1
-  );
+  my $our_dh     = $PK_FUNC_MAP{$DH_MODULE}->{new}->();
+  my $our_dh_pub = encode_base64url( $our_dh->export_key_der('public') );
+  my $secret     = $PK_FUNC_MAP{$DH_MODULE}->{shared_secret}->($our_dh, $their_dh_pk);
+
+  # enc_cipher, $secret
+  my $decryptor = sub {
+    return decrypt_with_secret( $_[0], $secret ); 
+  };
+
+  # value, secret, [salt]
+  my $encryptor = sub {
+    return encrypt_with_secret( $_[0], $secret, $_[1] );
+  };
+
+  return ( $our_dh_pub, $decryptor, $encryptor, $our_dh ); 
 }
 
-our $LOCALTZ = DateTime::TimeZone->new( name => 'local' );
+sub encrypt_with_secret {
+  my ( $value, $secret, $salt ) = @_;
 
-sub get_local_timezone { return $LOCALTZ; }
+  $salt ||= random_bytes(32);
 
-sub get_timestamp_iso8601 {
-  my ($dt) = @_;
+  my $key_salt = substr($salt, 0, 16); 
+  my $iv_salt  = substr($salt, 16, 16); 
 
-  return if !$dt;
+  my $key = hkdf($secret, $key_salt, 'SHA256', 16, "Content-Encoding: aes128gcm\x00" );
+  my $iv  = hkdf($secret, $iv_salt,  'SHA256', 12, "Content-Encoding: nonce\x00");
 
-  $dt->set_time_zone( get_local_timezone() )
-    if $dt->time_zone()->name eq 'floating';
+  my ($cipher, $tag) = gcm_encrypt_authenticate( 'AES', $key, $iv, '', $value );
 
-  my $tz = $dt->strftime('%z');
-  $tz =~ s/(\d{2})(\d{2})/$1:$2/;
+  return encode_base64url( $salt . $cipher. $tag );
+}  
 
-  return $dt->strftime("%Y-%m-%dT%H:%M:%S.%3N") . $tz;
+sub decrypt_with_secret {
+  my ( $base64_enc, $secret ) = @_;  
+
+  my $enc           = decode_base64url($base64_enc);
+  my $cipher_length = length($enc) - 48; # 48 for salt + tag;
+
+  my $salt   = substr($enc, 0, 32);
+  my $cipher = substr($enc, 32, $cipher_length); 
+  my $tag    = substr($enc, 32 + $cipher_length, 16);
+
+  my $key_salt = substr($salt, 0, 16); 
+  my $iv_salt  = substr($salt, 16, 16);
+
+  my $key = hkdf($secret, $key_salt, 'SHA256', 16, "Content-Encoding: aes128gcm\x00" );
+  my $iv  = hkdf($secret, $iv_salt, 'SHA256', 12, "Content-Encoding: nonce\x00"); 
+
+  return gcm_decrypt_verify( 'AES', $key, $iv, '', $cipher, $tag ); 
+} 
+
+sub get_shared_secret_from_keys {
+  my ($priv_pk, $pub_enc_der) = @_;
+
+  my $ret = 
+    try {
+      my $der     = decode_base64url($pub_enc_der);
+      my $edh_pk  = $PK_FUNC_MAP{$DH_MODULE}->{load}->($der);
+
+      return $PK_FUNC_MAP{$DH_MODULE}->{shared_secret}->($priv_pk, $edh_pk);
+    } 
+    catch { 
+      warn "DH ERROR: $_"
+    };
+
+  return $ret;
 }
 
-sub get_local_datetime {
+sub stored_key_encoding {
+   my ($base64) = shift;  
 
-  my $t  = time;
-  my $ns = int( ( $t - int($t) ) * 1_000_000_000 );
-
-  my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst ) = localtime($t);
-
-  my $dt_now = DateTime->new(
-    year       => $year + 1900,
-    month      => $mon + 1,
-    day        => $mday,
-    hour       => $hour,
-    minute     => $min,
-    second     => $sec,
-    nanosecond => $ns,
-    time_zone  => $LOCALTZ,
-  );
-
-  return $dt_now;
+   return key_encoding( decode_bin($base64) );
 }
 
-sub get_local_time_stamp { return get_timestamp_iso8601( get_local_datetime() ) }
+sub key_encoding {
+   my ($enc) = shift;  
 
-sub get_utc_datetime {
-
-  my $t  = time;
-  my $ns = int( ( $t - int($t) ) * 1_000_000_000 );
-
-  my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst ) = gmtime($t);
-
-  my $dt_now = DateTime->new(
-    year       => $year + 1900,
-    month      => $mon + 1,
-    day        => $mday,
-    hour       => $hour,
-    minute     => $min,
-    second     => $sec,
-    nanosecond => $ns,
-    time_zone  => 'UTC',
-  );
-
-  return $dt_now;
-}
-
-sub get_utc_time_stamp { return get_timestamp_iso8601( get_utc_datetime() ) }
-
-sub inflate_iso8601_datetime {
-  my ($datetime_str) = @_;
-
-  my $base_dt = DateTime->now->set_time_zone('floating');
-  my $iso8601 = DateTime::Format::ISO8601->new( base_datetime => $base_dt );
-
-  my $dt = try { $iso8601->parse_datetime($datetime_str) }
-  catch { croak("Invalid DateTime $datetime_str : $_"); };
-
-  return $dt;
-}
+   return hex(unpack('H2', $enc));
+}  
 
 sub gen_uuid {
 
@@ -376,6 +582,7 @@ sub make_uri_uuid {
 
   return $ret;
 }
+
 
 1;
 __END__
