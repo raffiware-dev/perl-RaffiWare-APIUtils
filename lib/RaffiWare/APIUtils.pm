@@ -40,7 +40,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '1.001001';
+our $VERSION = '1.001002';
 $VERSION = eval $VERSION; 
 
 our @EXPORT_OK = qw|
